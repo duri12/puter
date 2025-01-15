@@ -27,10 +27,9 @@ async function UIWindowLogin(options) {
             h += `<div style="padding: 20px; text-align: left; border: 1px solid #ccc; margin-top: 20px;">`;
             h += `<h2><strong>URL Parameters:</strong></h2>`;
             urlParams.forEach((value, key) => {
-                h += `<p><strong>${key}:</strong> ${value}</p>`;
+                h += `<p><strong>${key}:</strong> ${decodeURIComponent(value)}</p>`;
             });
             h += `</div>`;
-
         }
         h += `</div>`;
 

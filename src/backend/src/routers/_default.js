@@ -22,12 +22,21 @@ const config = require('../config');
 const router = express.Router();
 const _path = require('path');
 const _fs = require('fs');
+const axios = require('axios'); 
+const jwt = require('jsonwebtoken'); 
 const { Context } = require('../util/context');
 const { DB_READ } = require('../services/database/consts');
 const { PathBuilder } = require('../util/pathutil.js');
 
 let auth_user;
 
+const Keycloak = {
+    clientId: 'Puter',
+    clientSecret: 'RlPL4mR69umkOxqhudw1mdtS9vqq8TAf',
+    realm: 'RealmOne',
+    authServerUrl: 'http://localhost:8080',
+    redirectUri: 'http://puter.localhost:4100/login' // Fixed the redirectUri
+};
 // Helper function to safely handle metadata parsing
 const parseMetadata = (metadata) => {
     try {
@@ -410,6 +419,29 @@ router.all('*', async function(req, res, next) {
             }
             
             else if(path.startsWith('/login')){
+                const authCode = req.query.code;
+                // Exchange authorization code for tokens
+                const tokenResponse = await axios.post(
+                    `${Keycloak.authServerUrl}/realms/${Keycloak.realm}/protocol/openid-connect/token`,
+                    new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: Keycloak.clientId,
+                        client_secret: Keycloak.clientSecret,
+                        code: authCode,
+                        redirect_uri: Keycloak.redirectUri
+                    }),
+                    {
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        }
+                    }
+                );
+                
+                // Token response (contains access_token, refresh_token, etc.)
+                const tokens = tokenResponse.data;
+
+                // Decode the id_token to retrieve its payload
+                const idTokenPayload = jwt.decode(tokens.id_token);
                 const svc_puterHomepage = Context.get('services').get('puter-homepage');
                 return svc_puterHomepage.send({ req, res }, {
                     title: app_title,
@@ -420,14 +452,6 @@ router.all('*', async function(req, res, next) {
                     canonical_url: canonical_url,
                     icon: app_icon,
                 }, launch_options);
-                path = PathBuilder.resolve(path);
-                return res.sendFile(path, { root: _path.join(config.assets.gui, 'src') }, function(err) {
-                    if (err && err.statusCode) {
-                        return res.status(err.statusCode).send(path + '\n' + req.originalUrl);
-                    } else {
-                        res.redirect('/');
-                    }
-                });
             }
 
             // All other paths
