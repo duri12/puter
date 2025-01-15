@@ -408,6 +408,27 @@ router.all('*', async function(req, res, next) {
                     }
                 });
             }
+            
+            else if(path.startsWith('/login')){
+                const svc_puterHomepage = Context.get('services').get('puter-homepage');
+                return svc_puterHomepage.send({ req, res }, {
+                    title: app_title,
+                    description: app_description || config.short_description,
+                    short_description: app_description || config.short_description,
+                    social_media_image: app_social_media_image || config.social_media_image,
+                    company: 'Puter Technologies Inc.',
+                    canonical_url: canonical_url,
+                    icon: app_icon,
+                }, launch_options);
+                path = PathBuilder.resolve(path);
+                return res.sendFile(path, { root: _path.join(config.assets.gui, 'src') }, function(err) {
+                    if (err && err.statusCode) {
+                        return res.status(err.statusCode).send(path + '\n' + req.originalUrl);
+                    } else {
+                        res.redirect('/');
+                    }
+                });
+            }
 
             // All other paths
             else{
