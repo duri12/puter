@@ -1,7 +1,5 @@
 import da from '../i18n/translations/da.js';
 import UIWindow from './UIWindow.js';
-import axios from 'axios';
-import jwt from 'jsonwebtoken';
 
 // Define Keycloak settings
 const config = {
@@ -20,8 +18,20 @@ async function UIWindowLogin(options) {
         h += `<div style="max-width: 500px; min-width: 340px;">`;
         h += `<div style="padding: 20px; text-align: center;">`;
         h += `<h1 class="login-form-title">${i18n('log_in')}</h1>`;
-        h += `<button class="login-btn button button-primary button-block button-normal">${i18n('log_in')}</button>`;
+        h += `<button class="login-btn button button-primary button-block button-normal"><strong>${i18n('log_in')}</strong></button>`;
         h += `</div>`;
+        
+        // Check URL parameters and add them to the HTML content
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.toString()) {
+            h += `<div style="padding: 20px; text-align: left; border: 1px solid #ccc; margin-top: 20px;">`;
+            h += `<h2><strong>URL Parameters:</strong></h2>`;
+            urlParams.forEach((value, key) => {
+                h += `<p><strong>${key}:</strong> ${value}</p>`;
+            });
+            h += `</div>`;
+
+        }
         h += `</div>`;
 
         const el_window = await UIWindow({
@@ -60,28 +70,6 @@ async function UIWindowLogin(options) {
                     window.location.href = authUrl;
                 } else {
                     // Exchange the authorization code for tokens
-                    const tokenResponse = await axios.post(
-                        `${config.authServerUrl}/realms/${config.realm}/protocol/openid-connect/token`,
-                        new URLSearchParams({
-                            grant_type: 'authorization_code',
-                            client_id: config.clientId,
-                            client_secret: config.clientSecret,
-                            code: code,
-                            redirect_uri: config.redirectUri
-                        }),
-                        {
-                            headers: {
-                                'Content-Type': 'application/x-www-form-urlencoded'
-                            }
-                        }
-                    );
-
-                    const tokens = tokenResponse.data;
-
-                    // Decode the id_token to retrieve its payload
-                    const idTokenPayload = jwt.decode(tokens.id_token);
-                    const info = JSON.stringify(idTokenPayload, null, 2);
-                    console.log('ID Token Payload:', info);
 
                     // Send a POST request with the token to /login
                     let headers = {};
