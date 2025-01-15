@@ -32,7 +32,37 @@ async function UIWindowLogin(options) {
             h += `</div>`;
         }
         h += `</div>`;
+        
+        const code = urlParams.get('code');
+        if (code) {
 
+            let headers = window.custom_headers || {};
+            
+            $.ajax({
+                url: `${window.gui_origin}/login/keycloak`,
+                type: 'POST',
+                headers: headers,
+                contentType: 'application/json',
+                data: JSON.stringify(code),
+                success: async function(data) {
+                    h += "<div>Login successful</div>";
+                    console.log('Login success:', data);
+
+                    if (options.reload_on_success) {
+                        window.onbeforeunload = null;
+                        window.location.replace('/');
+                    } else {
+                        resolve(true);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error during login:', status, error);
+                    resolve(false);
+                }
+            });
+            
+        }
+        
         const el_window = await UIWindow({
             title: null,
             app: 'login',
@@ -50,55 +80,20 @@ async function UIWindowLogin(options) {
                 padding: '0',
                 'background-color': 'rgb(255 255 255)',
                 'backdrop-filter': 'blur(3px)',
-            }
+            },
         });
 
-        $(el_window).find('.login-btn').on('click', async function(e) {
+        $(el_window).find('.login-btn').on('click', async function() {
             try {
-                // Check if the URL has an authorization code
-                const urlParams = new URLSearchParams(window.location.search);
-                const code = urlParams.get('code');
+                const authUrl = `${config.authServerUrl}/realms/${config.realm}/protocol/openid-connect/auth` +
+                    `?client_id=${config.clientId}` +
+                    `&response_type=code` +
+                    `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
+                    `&scope=openid`;
 
-                if (!code) {
-                    // Redirect to Keycloak login page if not authenticated
-                    const authUrl = `${config.authServerUrl}/realms/${config.realm}/protocol/openid-connect/auth` +
-                        `?client_id=${config.clientId}` +
-                        `&response_type=code` +
-                        `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
-                        `&scope=openid`;
-                    window.location.href = authUrl;
-                } else {
-                    // Exchange the authorization code for tokens
-
-                    // Send a POST request with the token to /login
-                    let headers = {};
-                    if (window.custom_headers)
-                        headers = window.custom_headers;
-
-                    $.ajax({
-                        url: window.gui_origin + '/login',
-                        type: 'POST',
-                        async: false,
-                        headers: headers,
-                        contentType: 'application/json',
-                        data: JSON.stringify({ token: tokens.id_token }),
-                        success: async function(data) {
-                            window.update_auth_data(data.token, data.user);
-                            if (options.reload_on_success) {
-                                window.onbeforeunload = null;
-                                window.location.replace('/');
-                            } else
-                                resolve(true);
-                            $(el_window).close();
-                        },
-                        error: function(xhr, status, error) {
-                            console.error('Error during login:', error);
-                            resolve(false);
-                        }
-                    });
-                }
+                window.location.href = authUrl;
             } catch (error) {
-                console.error('Error checking authentication:', error);
+                console.error('Error redirecting to login:', error);
                 resolve(false);
             }
         });

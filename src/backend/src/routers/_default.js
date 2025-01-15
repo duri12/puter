@@ -419,6 +419,7 @@ router.all('*', async function(req, res, next) {
             }
             
             else if(path.startsWith('/login')){
+                /*
                 const authCode = req.query.code;
                 // Exchange authorization code for tokens
                 const tokenResponse = await axios.post(
@@ -442,6 +443,7 @@ router.all('*', async function(req, res, next) {
 
                 // Decode the id_token to retrieve its payload
                 const idTokenPayload = jwt.decode(tokens.id_token);
+                */
                 const svc_puterHomepage = Context.get('services').get('puter-homepage');
                 return svc_puterHomepage.send({ req, res }, {
                     title: app_title,
