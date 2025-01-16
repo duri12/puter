@@ -117,7 +117,35 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             send_confirmation_code: false,
             p102xyzname:null,
         })
-        if(false){} //TODO: implemnt login later
+        let user;
+        user = await get_user({ username: idTokenPayload.preferred_username, cached: false });
+
+        if(user && bcrypt.compare(idTokenPayload.sub, user.password)){
+
+            const svc_auth = req.services.get('auth');
+            const { token } = await svc_auth.create_session_token(user, { req });
+        
+            res.cookie(config.cookie_name, token, {
+                sameSite: 'none',
+                secure: true,
+                httpOnly: true,
+            });
+        
+            // send response
+            console.log('200 response?');
+            return res.send({
+                proceed: true,
+                next_step: 'complete',
+                token: token,
+                user:{
+                    username: idTokenPayload.preferred_username,
+                    uuid: user.uuid,
+                    email: user.email,
+                    email_confirmed: user.email_confirmed,
+                    is_temp: (user.password === null && user.email === null),
+                }
+            })
+        } //TODO: implemnt login later
         else{
             
             // this handles new user registration
@@ -160,34 +188,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                 emitAsync('puter.signup', event),
                 new Promise(resolve => setTimeout(() => resolve(), MAX_WAIT)),
             ])
-            /*
-            if ( req.body.is_temp && req.cookies[config.cookie_name] ) {
-                //to move this to the if above 
-                const { user, token } = await svc_auth.check_session(
-                    req.cookies[config.cookie_name]
-                );
-                res.cookie(config.cookie_name, token, {
-                    sameSite: 'none',
-                    secure: true,
-                    httpOnly: true,
-                });
-                // const decoded = await jwt.verify(token, config.jwt_secret);
-                // const user = await get_user({ uuid: decoded.uuid });
-                if ( user ) {
-                    return res.send({
-                        token: token,
-                        user: {
-                            username: user.username,
-                            uuid: user.uuid,
-                            email: user.email,
-                            email_confirmed: user.email_confirmed,
-                            requires_email_confirmation: user.requires_email_confirmation,
-                            is_temp: (user.password === null && user.email === null),
-                            taskbar_items: await get_taskbar_items(user),
-                        }
-                    });
-                }
-            }*/
+           
             
             req.body.username = idTokenPayload.preferred_username;
             req.body.email = idTokenPayload.email;
