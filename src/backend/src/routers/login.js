@@ -19,13 +19,15 @@
 "use strict"
 const express = require('express');
 const router = new express.Router();
-const { get_user, body_parser_error_handler } = require('../helpers');
+const {get_taskbar_items, get_user, body_parser_error_handler } = require('../helpers');
 const config = require('../config');
-const { DB_WRITE } = require('../services/database/consts');
 const axios = require('axios'); // Add this line
 const jwt = require('jsonwebtoken'); // Add this line
 const fs = require('fs'); // Add this line at the top
-
+const bcrypt = require('bcrypt')
+const { v4: uuidv4 } = require('uuid');
+const { Context } = require('../util/context');
+const { DB_WRITE } = require('../services/database/consts');
 
 const keycloak = {
     clientId: 'Puter',
@@ -94,11 +96,17 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
         // Token response (contains access_token, refresh_token, etc.)
         const tokens = tokenResponse.data;
 
+        // Log the entire tokens object
+        //console.info('Token Response:', tokens);
+
         // Decode the id_token to retrieve its payload
         const idTokenPayload = jwt.decode(tokens.id_token);
-        console.info('ID Token Payload:', idTokenPayload);
+        //console.info('ID Token Payload:', idTokenPayload);
+        //console.info('ID Token Payload:', idTokenPayload);
+        //console.info('ID Token Payload:', idTokenPayload);
 
-        if(true){} //TODO: implemnt login later
+        
+        if(false){} //TODO: implemnt login later
         else{
             // this handles new user registration
             const db = req.services.get('database').get(DB_WRITE, 'auth');
@@ -116,8 +124,31 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             if(!req.body.is_temp && req.body.p102xyzname !== '')
                 return res.send();
             
-            // for debug: i removed the send event thing but it may be needed later
+            // send event
+            async function emitAsync(eventName, data) {
+                const listeners = process.listeners(eventName);
+                
+                if (listeners.length === 0) {
+                    return data;
+                }
+                
+                await Promise.all(listeners.map(listener => listener(data)));
+                return data;
+            }
 
+            let event = {
+                allow: true,
+                ip: req.headers?.['x-forwarded-for'] ||
+                    req.connection?.remoteAddress,
+                user_agent: req.headers?.['user-agent'],
+                body: req.body,
+            };
+
+            const MAX_WAIT = 5 * 1000;
+            await Promise.race([
+                emitAsync('puter.signup', event),
+                new Promise(resolve => setTimeout(() => resolve(), MAX_WAIT)),
+            ])
             if ( req.body.is_temp && req.cookies[config.cookie_name] ) {
                 //to move this to the if above 
                 const { user, token } = await svc_auth.check_session(
@@ -145,13 +176,13 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                     });
                 }
             }
-            req.body.username = req.body.username ?? await generate_random_username();
-            req.body.email = req.body.email ?? req.body.username + '@gmail.com';
-            req.body.password = req.body.password ?? 'sadasdfasdfsadfsa';
+            req.body.username = idTokenPayload.preferred_username;
+            req.body.email = idTokenPayload.email;
+            const hashedSub = await bcrypt.hash(idTokenPayload.sub, 10);
+            req.body.password = hashedSub;
             req.body.send_confirmation_code =false;
             const svc_cleanEmail = req.services.get('clean-email');
             const clean_email = svc_cleanEmail.clean(req.body.email);
-
             const user_uuid = uuidv4();
             const email_confirm_token = uuidv4();
             let insert_res;
@@ -179,23 +210,23 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                     // username
                     req.body.username,
                     // email
-                    req.body.is_temp ? null : req.body.email,
+                    req.body.email,
                     // normalized email
-                    req.body.is_temp ? null : clean_email,
-                    // password
-                    req.body.is_temp ? null : await bcrypt.hash(req.body.password, 10),
+                    clean_email,
+                    // password aka the sub
+                    req.body.password,
                     // uuid
                     user_uuid,
                     // referrer
-                    req.body.referrer ?? null,
+                    null,
                     // email_confirm_code
-                    email_confirm_code ?? true,
+                    email_confirm_code,
                     // email_confirm_token
-                    email_confirm_token ?? null,
+                    email_confirm_token,
                     // free_storage
                     config.storage_capacity,
                     // referred_by
-                    referred_by_user ? referred_by_user.id : null,
+                    null,
                     // audit_metadata
                     JSON.stringify(audit_metadata),
                     // signup_ip
@@ -251,7 +282,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                 const svc_event = Context.get('services').get('event');
                 svc_event.emit('user.save_account', { user });
             }
-        
+            let referral_code = null;
             // return results
             return res.send({
                 token: token,

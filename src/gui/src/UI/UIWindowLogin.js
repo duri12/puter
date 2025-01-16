@@ -46,6 +46,7 @@ async function UIWindowLogin(options) {
                 async: false,
                 data: JSON.stringify({ code }),
                 success: async function(data) {
+                    window.update_auth_data(data.token, data.user);
                     if (options.reload_on_success) {
                         window.onbeforeunload = null;
                         window.location.replace('/');
