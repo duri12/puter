@@ -39,8 +39,6 @@ const complete_ = async ({ req, res, user }) => {
     const svc_auth = req.services.get('auth');
     const { token } = await svc_auth.create_session_token(user, { req });
 
-    //set cookie
-    // res.cookie(config.cookie_name, token);
     res.cookie(config.cookie_name, token, {
         sameSite: 'none',
         secure: true,
@@ -67,6 +65,9 @@ const complete_ = async ({ req, res, user }) => {
 // POST /login/keycloak
 // -----------------------------------------------------------------------//
 router.post('/login/keycloak', express.json(), body_parser_error_handler, async (req, res, next) => {
+    if(require('../helpers').subdomain(req) !== 'api' && require('../helpers').subdomain(req) !== '')
+        next();
+
     const { code } = req.body;
     if (!code) {
         return res.status(400).send('Authorization code is required.');
@@ -97,18 +98,177 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
         const idTokenPayload = jwt.decode(tokens.id_token);
         console.info('ID Token Payload:', idTokenPayload);
 
-       
-        // Find or create the user based on the idTokenPayload
-        let user = await get_user({ email: idTokenPayload.email, cached: false });
-        if (!user) {
-            // Create a new user if not found
-            const db = req.services.get('database').get(DB_WRITE, 'default');
-            const result = await db.write(
-                `INSERT INTO user (uuid, username, email, email_confirmed) VALUES (?, ?, ?, ?)`,
-                [idTokenPayload.sub, idTokenPayload.preferred_username, idTokenPayload.email, true]
+        if(true){} //TODO: implemnt login later
+        else{
+            // this handles new user registration
+            const db = req.services.get('database').get(DB_WRITE, 'auth');
+            const svc_auth = Context.get('services').get('auth');
+            const svc_authAudit = Context.get('services').get('auth-audit');
+            svc_authAudit.record({
+                requester: Context.get('requester'),
+                action: `signup:real`,
+                body: req.body,
+            });
+
+            // check bot trap, if `p102xyzname` is anything but an empty string it means
+            // that a bot has filled the form
+            // doesn't apply to temp users
+            if(!req.body.is_temp && req.body.p102xyzname !== '')
+                return res.send();
+            
+            // for debug: i removed the send event thing but it may be needed later
+
+            if ( req.body.is_temp && req.cookies[config.cookie_name] ) {
+                //to move this to the if above 
+                const { user, token } = await svc_auth.check_session(
+                    req.cookies[config.cookie_name]
+                );
+                res.cookie(config.cookie_name, token, {
+                    sameSite: 'none',
+                    secure: true,
+                    httpOnly: true,
+                });
+                // const decoded = await jwt.verify(token, config.jwt_secret);
+                // const user = await get_user({ uuid: decoded.uuid });
+                if ( user ) {
+                    return res.send({
+                        token: token,
+                        user: {
+                            username: user.username,
+                            uuid: user.uuid,
+                            email: user.email,
+                            email_confirmed: user.email_confirmed,
+                            requires_email_confirmation: user.requires_email_confirmation,
+                            is_temp: (user.password === null && user.email === null),
+                            taskbar_items: await get_taskbar_items(user),
+                        }
+                    });
+                }
+            }
+            req.body.username = req.body.username ?? await generate_random_username();
+            req.body.email = req.body.email ?? req.body.username + '@gmail.com';
+            req.body.password = req.body.password ?? 'sadasdfasdfsadfsa';
+            req.body.send_confirmation_code =false;
+            const svc_cleanEmail = req.services.get('clean-email');
+            const clean_email = svc_cleanEmail.clean(req.body.email);
+
+            const user_uuid = uuidv4();
+            const email_confirm_token = uuidv4();
+            let insert_res;
+            let email_confirm_code = Math.floor(100000 + Math.random() * 900000);
+
+            const audit_metadata = {
+                ip: req.connection.remoteAddress,
+                ip_fwd: req.headers['x-forwarded-for'],
+                user_agent: req.headers['user-agent'],
+                origin: req.headers['origin'],
+                server: config.server_id,
+            };
+            
+            insert_res = await db.write(
+                `INSERT INTO user
+                (
+                    username, email, clean_email, password, uuid, referrer, 
+                    email_confirm_code, email_confirm_token, free_storage, 
+                    referred_by, audit_metadata, signup_ip, signup_ip_forwarded, 
+                    signup_user_agent, signup_origin, signup_server
+                ) 
+                VALUES 
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    // username
+                    req.body.username,
+                    // email
+                    req.body.is_temp ? null : req.body.email,
+                    // normalized email
+                    req.body.is_temp ? null : clean_email,
+                    // password
+                    req.body.is_temp ? null : await bcrypt.hash(req.body.password, 10),
+                    // uuid
+                    user_uuid,
+                    // referrer
+                    req.body.referrer ?? null,
+                    // email_confirm_code
+                    email_confirm_code ?? true,
+                    // email_confirm_token
+                    email_confirm_token ?? null,
+                    // free_storage
+                    config.storage_capacity,
+                    // referred_by
+                    referred_by_user ? referred_by_user.id : null,
+                    // audit_metadata
+                    JSON.stringify(audit_metadata),
+                    // signup_ip
+                    req.connection.remoteAddress ?? null,
+                    // signup_ip_fwd
+                    req.headers['x-forwarded-for'] ?? null,
+                    // signup_user_agent
+                    req.headers['user-agent'] ?? null,
+                    // signup_origin
+                    req.headers['origin'] ?? null,
+                    // signup_server
+                    config.server_id ?? null,
+                ]
             );
-            user = await get_user({ uuid: idTokenPayload.sub, cached: false });
+    
+            // record activity
+            db.write(
+                'UPDATE `user` SET `last_activity_ts` = now() WHERE id=? LIMIT 1',
+                [insert_res.insertId]
+            );
+            
+            // TODO: cache group id
+            const svc_group = req.services.get('group');
+            await svc_group.add_users({
+                uid: config.default_user_group,
+                users: [req.body.username]
+            });
+            const user_id =insert_res.insertId;
+
+            const [user] = await db.pread(
+                'SELECT * FROM `user` WHERE `id` = ? LIMIT 1',
+                [user_id]
+            );
+        
+            // create token for login
+            const { token } = await svc_auth.create_session_token(user, {
+                req,
+            });
+
+            // generate default fsentries
+            const svc_user = Context.get('services').get('user');
+            await svc_user.generate_default_fsentries({ user });
+        
+            //set cookie
+            res.cookie(config.cookie_name, token, {
+                sameSite: 'none',
+                secure: true,
+                httpOnly: true,
+            });
+        
+            // add to mailchimp
+            if(!req.body.is_temp){
+                const svc_event = Context.get('services').get('event');
+                svc_event.emit('user.save_account', { user });
+            }
+        
+            // return results
+            return res.send({
+                token: token,
+                user:{
+                    username: user.username,
+                    uuid: user.uuid,
+                    email: user.email,
+                    email_confirmed: user.email_confirmed,
+                    requires_email_confirmation: user.requires_email_confirmation,
+                    is_temp: (user.password === null && user.email === null),
+                    taskbar_items: await get_taskbar_items(user),
+                    referral_code,
+                }
+            })
         }
+
+        
         return res.status(501).send("WE TAKE THOSEEEEEEE")
 
         return await complete_({ req, res, user });
