@@ -26,6 +26,15 @@ const axios = require('axios'); // Add this line
 const jwt = require('jsonwebtoken'); // Add this line
 const fs = require('fs'); // Add this line at the top
 
+
+const keycloak = {
+    clientId: 'Puter',
+    clientSecret: 'RlPL4mR69umkOxqhudw1mdtS9vqq8TAf',
+    realm: 'RealmOne',
+    authServerUrl: 'http://localhost:8080',
+    redirectUri: 'http://puter.localhost:4100/login' // Fixed the redirectUri
+};
+
 const complete_ = async ({ req, res, user }) => {
     const svc_auth = req.services.get('auth');
     const { token } = await svc_auth.create_session_token(user, { req });
@@ -59,7 +68,6 @@ const complete_ = async ({ req, res, user }) => {
 // -----------------------------------------------------------------------//
 router.post('/login/keycloak', express.json(), body_parser_error_handler, async (req, res, next) => {
     const { code } = req.body;
-
     if (!code) {
         return res.status(400).send('Authorization code is required.');
     }
@@ -67,13 +75,13 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
     try {
         // Exchange authorization code for tokens
         const tokenResponse = await axios.post(
-            `${config.authServerUrl}/realms/${config.realm}/protocol/openid-connect/token`,
+            `${keycloak.authServerUrl}/realms/${keycloak.realm}/protocol/openid-connect/token`,
             new URLSearchParams({
                 grant_type: 'authorization_code',
-                client_id: config.clientId,
-                client_secret: config.clientSecret,
+                client_id: keycloak.clientId,
+                client_secret: keycloak.clientSecret,
                 code: code,
-                redirect_uri: config.redirectUri
+                redirect_uri: keycloak.redirectUri
             }),
             {
                 headers: {
@@ -89,13 +97,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
         const idTokenPayload = jwt.decode(tokens.id_token);
         console.info('ID Token Payload:', idTokenPayload);
 
-        // Log idTokenPayload to a file
-        fs.appendFile('idTokenPayload.log', JSON.stringify(idTokenPayload) + '\n', (err) => {
-            if (err) {
-                console.error('Error writing to log file:', err);
-            }
-        });
-
+       
         // Find or create the user based on the idTokenPayload
         let user = await get_user({ email: idTokenPayload.email, cached: false });
         if (!user) {
@@ -107,8 +109,10 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             );
             user = await get_user({ uuid: idTokenPayload.sub, cached: false });
         }
+        return res.status(501).send("WE TAKE THOSEEEEEEE")
 
         return await complete_({ req, res, user });
+        
     } catch (error) {
         console.error('Error during Keycloak login:', error);
         return res.status(500).send('Internal Server Error');

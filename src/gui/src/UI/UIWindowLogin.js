@@ -2,7 +2,7 @@ import da from '../i18n/translations/da.js';
 import UIWindow from './UIWindow.js';
 
 // Define Keycloak settings
-const config = {
+const keycloak = {
     clientId: 'Puter',
     clientSecret: 'RlPL4mR69umkOxqhudw1mdtS9vqq8TAf',
     realm: 'RealmOne',
@@ -43,11 +43,9 @@ async function UIWindowLogin(options) {
                 type: 'POST',
                 headers: headers,
                 contentType: 'application/json',
-                data: JSON.stringify(code),
+                async: false,
+                data: JSON.stringify({ code }),
                 success: async function(data) {
-                    h += "<div>Login successful</div>";
-                    console.log('Login success:', data);
-
                     if (options.reload_on_success) {
                         window.onbeforeunload = null;
                         window.location.replace('/');
@@ -85,10 +83,10 @@ async function UIWindowLogin(options) {
 
         $(el_window).find('.login-btn').on('click', async function() {
             try {
-                const authUrl = `${config.authServerUrl}/realms/${config.realm}/protocol/openid-connect/auth` +
-                    `?client_id=${config.clientId}` +
+                const authUrl = `${keycloak.authServerUrl}/realms/${keycloak.realm}/protocol/openid-connect/auth` +
+                    `?client_id=${keycloak.clientId}` +
                     `&response_type=code` +
-                    `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
+                    `&redirect_uri=${encodeURIComponent(keycloak.redirectUri)}` +
                     `&scope=openid`;
 
                 window.location.href = authUrl;
