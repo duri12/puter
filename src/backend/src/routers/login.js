@@ -106,8 +106,20 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
         //console.info('ID Token Payload:', idTokenPayload);
 
         
+        const hashedSub = await bcrypt.hash(idTokenPayload.sub, 10);
+        
+        const temp_body = JSON.stringify({
+            username: idTokenPayload.preferred_username,
+            referral_code: null,
+            email: idTokenPayload.email,
+            password: hashedSub,
+            referrer: null,
+            send_confirmation_code: false,
+            p102xyzname:null,
+        })
         if(false){} //TODO: implemnt login later
         else{
+            
             // this handles new user registration
             const db = req.services.get('database').get(DB_WRITE, 'auth');
             const svc_auth = Context.get('services').get('auth');
@@ -115,16 +127,15 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             svc_authAudit.record({
                 requester: Context.get('requester'),
                 action: `signup:real`,
-                body: req.body,
+                body: temp_body,
             });
-
+            
             // check bot trap, if `p102xyzname` is anything but an empty string it means
             // that a bot has filled the form
             // doesn't apply to temp users
-            if(!req.body.is_temp && req.body.p102xyzname !== '')
-                return res.send();
             
             // send event
+            
             async function emitAsync(eventName, data) {
                 const listeners = process.listeners(eventName);
                 
@@ -141,7 +152,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                 ip: req.headers?.['x-forwarded-for'] ||
                     req.connection?.remoteAddress,
                 user_agent: req.headers?.['user-agent'],
-                body: req.body,
+                body: temp_body,
             };
 
             const MAX_WAIT = 5 * 1000;
@@ -149,6 +160,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                 emitAsync('puter.signup', event),
                 new Promise(resolve => setTimeout(() => resolve(), MAX_WAIT)),
             ])
+            /*
             if ( req.body.is_temp && req.cookies[config.cookie_name] ) {
                 //to move this to the if above 
                 const { user, token } = await svc_auth.check_session(
@@ -175,10 +187,10 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                         }
                     });
                 }
-            }
+            }*/
+            
             req.body.username = idTokenPayload.preferred_username;
             req.body.email = idTokenPayload.email;
-            const hashedSub = await bcrypt.hash(idTokenPayload.sub, 10);
             req.body.password = hashedSub;
             req.body.send_confirmation_code =false;
             const svc_cleanEmail = req.services.get('clean-email');
@@ -224,7 +236,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                     // email_confirm_token
                     email_confirm_token,
                     // free_storage
-                    config.storage_capacity,
+                    1024*1024*500,
                     // referred_by
                     null,
                     // audit_metadata
@@ -241,7 +253,7 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                     config.server_id ?? null,
                 ]
             );
-    
+            
             // record activity
             db.write(
                 'UPDATE `user` SET `last_activity_ts` = now() WHERE id=? LIMIT 1',
@@ -252,15 +264,15 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             const svc_group = req.services.get('group');
             await svc_group.add_users({
                 uid: config.default_user_group,
-                users: [req.body.username]
+                users: [idTokenPayload.preferred_username]
             });
             const user_id =insert_res.insertId;
-
+            
             const [user] = await db.pread(
                 'SELECT * FROM `user` WHERE `id` = ? LIMIT 1',
                 [user_id]
             );
-        
+            
             // create token for login
             const { token } = await svc_auth.create_session_token(user, {
                 req,
@@ -269,19 +281,21 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
             // generate default fsentries
             const svc_user = Context.get('services').get('user');
             await svc_user.generate_default_fsentries({ user });
-        
+          
             //set cookie
+            
             res.cookie(config.cookie_name, token, {
                 sameSite: 'none',
                 secure: true,
                 httpOnly: true,
             });
-        
+            
+            
             // add to mailchimp
-            if(!req.body.is_temp){
-                const svc_event = Context.get('services').get('event');
-                svc_event.emit('user.save_account', { user });
-            }
+            
+            const svc_event = Context.get('services').get('event');
+            svc_event.emit('user.save_account', { user });
+            
             let referral_code = null;
             // return results
             return res.send({
@@ -297,11 +311,10 @@ router.post('/login/keycloak', express.json(), body_parser_error_handler, async 
                     referral_code,
                 }
             })
+                 
         }
 
         
-        return res.status(501).send("WE TAKE THOSEEEEEEE")
-
         return await complete_({ req, res, user });
         
     } catch (error) {
